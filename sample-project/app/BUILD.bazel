@@ -1,0 +1,28 @@
+# Top-level binaries depend on shared services and infra.
+sh_binary(
+    name = "cli",
+    srcs = ["cli.sh"],
+    deps = [
+        "//services/auth:auth_lib",
+        "//services/data:data_lib",
+        "//lib/utils:logging",
+    ],
+)
+
+sh_binary(
+    name = "worker",
+    srcs = ["worker.sh"],
+    deps = [
+        "//services/data:indexer",
+        "//lib/net:rpc",
+    ],
+)
+
+sh_test(
+    name = "integration_test",
+    srcs = ["integration_test.sh"],
+    data = [
+        ":cli",
+        ":worker",
+    ],
+)

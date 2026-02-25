@@ -1,0 +1,22 @@
+# Core layer. Dependencies here are intentionally deepened to create
+# a meaningful critical path for analyzer output.
+sh_library(
+    name = "config",
+    srcs = ["config.sh"],
+    deps = ["//lib/utils:logging"],
+)
+
+sh_library(
+    name = "math",
+    srcs = ["math.sh"],
+    deps = ["//lib/utils:strings"],
+)
+
+sh_library(
+    name = "runtime",
+    srcs = ["runtime.sh"],
+    deps = [
+        "//lib/utils:time",
+        "//lib/core:config",
+    ],
+)

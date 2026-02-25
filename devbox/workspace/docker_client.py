@@ -5,10 +5,10 @@ inspecting, and destroying workspace containers. All container-level
 Docker calls go through this module — command logic stays in commands.py.
 """
 
-import os
 import subprocess
 import sys
 from datetime import datetime, timezone
+from pathlib import Path
 
 import docker
 import docker.errors
@@ -63,15 +63,7 @@ def create_container(
         The newly created and started Container object.
     """
     client = get_client()
-    image = resolve_template_image(template)
-
-    # Pull the image if not already present (shows progress in terminal)
-    try:
-        client.images.get(image)
-    except docker.errors.ImageNotFound:
-        from devbox.utils.console import console
-        console.print(f"[dim]Pulling image [cyan]{image}[/cyan]...[/dim]")
-        client.images.pull(image)
+    image = ensure_template_image(client, template)
 
     container = client.containers.run(
         image=image,
@@ -101,6 +93,13 @@ def get_container(name: str) -> Container | None:
         return client.containers.get(name)
     except docker.errors.NotFound:
         return None
+
+
+def rename_container(container_id: str, new_name: str) -> None:
+    """Rename an existing container."""
+    client = get_client()
+    container = client.containers.get(container_id)
+    container.rename(new_name)
 
 
 def stop_and_remove_container(container_id: str, force: bool = False) -> None:
@@ -159,6 +158,25 @@ def get_container_stats(container_id: str) -> dict:
         return {}
 
 
+def get_container_runtime(container_id: str) -> dict:
+    """Return live state and uptime seconds for a container."""
+    client = get_client()
+    try:
+        container = client.containers.get(container_id)
+        container.reload()
+        started_at_raw = container.attrs.get("State", {}).get("StartedAt")
+        uptime_seconds = None
+        if started_at_raw and started_at_raw != "0001-01-01T00:00:00Z":
+            started_at = datetime.fromisoformat(started_at_raw.replace("Z", "+00:00"))
+            uptime_seconds = max(0, int((datetime.now(timezone.utc) - started_at).total_seconds()))
+        return {
+            "state": container.status,
+            "uptime_seconds": uptime_seconds,
+        }
+    except (docker.errors.NotFound, ValueError):
+        return {}
+
+
 def _parse_stats(raw: dict) -> dict:
     """Parse raw Docker stats into human-readable CPU % and memory usage."""
     try:
@@ -201,16 +219,50 @@ TEMPLATE_IMAGES: dict[str, str] = {
     "base": "ubuntu:22.04",
     "python": "python:3.11-slim",
     "node": "node:20-slim",
+    "bazel-python": "python:3.11-slim",
+    "bazel-java": "eclipse-temurin:21-jdk",
 }
 
 
 def resolve_template_image(template: str) -> str:
-    """Return the Docker image for a template name.
+    """Return default image for a template key.
 
     Falls back to treating the template value as a raw image name if it's
     not in the registry, so users can also pass image names directly.
     """
     return TEMPLATE_IMAGES.get(template, template)
+
+
+def _template_root() -> Path:
+    return Path(__file__).resolve().parents[2] / "templates"
+
+
+def _template_dockerfile(template: str) -> Path:
+    return _template_root() / template / "Dockerfile"
+
+
+def ensure_template_image(client: docker.DockerClient, template: str) -> str:
+    """Build or pull image for a template and return the image tag."""
+    dockerfile = _template_dockerfile(template)
+    if dockerfile.exists():
+        tag = f"devbox-template-{template}:latest"
+        from devbox.utils.console import console
+        console.print(f"[dim]Building local template image [cyan]{tag}[/cyan]...[/dim]")
+        client.images.build(
+            path=str(dockerfile.parent),
+            tag=tag,
+            rm=True,
+        )
+        return tag
+
+    image = resolve_template_image(template)
+    try:
+        client.images.get(image)
+    except docker.errors.ImageNotFound:
+        from devbox.utils.console import console
+        console.print(f"[dim]Pulling image [cyan]{image}[/cyan]...[/dim]")
+        client.images.pull(image)
+    return image
 
 
 def list_devbox_containers() -> list[Container]:

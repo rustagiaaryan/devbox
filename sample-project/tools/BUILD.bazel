@@ -1,0 +1,15 @@
+# Utility binaries with lighter dependency paths.
+sh_binary(
+    name = "lint",
+    srcs = ["lint.sh"],
+    deps = ["//lib/utils:logging"],
+)
+
+sh_binary(
+    name = "migrate",
+    srcs = ["migrate.sh"],
+    deps = [
+        "//services/data:data_lib",
+        "//services/data:cache_lib",
+    ],
+)

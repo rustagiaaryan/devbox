@@ -1,0 +1,16 @@
+# Small utility modules reused across most of the graph.
+# These often become fan-in points in large repositories.
+sh_library(
+    name = "strings",
+    srcs = ["strings.sh"],
+)
+
+sh_library(
+    name = "logging",
+    srcs = ["logging.sh"],
+)
+
+sh_library(
+    name = "time",
+    srcs = ["time.sh"],
+)

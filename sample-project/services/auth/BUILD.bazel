@@ -1,0 +1,15 @@
+# Auth service depends on core + network abstractions.
+sh_library(
+    name = "auth_lib",
+    srcs = ["auth.sh"],
+    deps = [
+        "//lib/net:rpc",
+        "//lib/core:config",
+    ],
+)
+
+sh_test(
+    name = "auth_test",
+    srcs = ["auth_test.sh"],
+    data = [":auth_lib"],
+)

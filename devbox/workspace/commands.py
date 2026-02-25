@@ -6,15 +6,12 @@ from datetime import datetime, timezone
 
 import click
 from rich.table import Table
-from rich.text import Text
 from rich import box
 
 from devbox.utils.console import console
 from devbox.workspace.db import (
     DEFAULT_DB_PATH,
     STATE_RUNNING,
-    STATE_POOL,
-    STATE_ERROR,
     WorkspaceDB,
     WorkspaceRecord,
 )
@@ -41,7 +38,12 @@ def workspace() -> None:
 
 @workspace.command(name="create")
 @click.argument("name")
-@click.option("--template", default="base", show_default=True, help="Workspace template (base, python, node)")
+@click.option(
+    "--template",
+    default="base",
+    show_default=True,
+    help="Workspace template (base, python, node, bazel-python, bazel-java)",
+)
 @click.option("--cpu", default=2, show_default=True, type=int, help="CPU count")
 @click.option("--memory", default="4g", show_default=True, help="Memory limit (e.g. 4g, 512m)")
 def workspace_create(name: str, template: str, cpu: int, memory: str) -> None:
@@ -62,7 +64,7 @@ def workspace_create(name: str, template: str, cpu: int, memory: str) -> None:
 
     # --- Fast path: claim from warm pool ---
     with console.status(f"[bold green]Checking warm pool...[/bold green]"):
-        claimed = pool.acquire(name)
+        claimed = pool.acquire(name, template=template)
 
     if claimed:
         console.print(
@@ -115,7 +117,7 @@ def workspace_create(name: str, template: str, cpu: int, memory: str) -> None:
 
 @workspace.command(name="list")
 def workspace_list() -> None:
-    """List all workspaces with their status, template, and resource config."""
+    """List all workspaces with status, uptime, and resource usage."""
     db = _get_db()
     workspaces = db.list_workspaces(include_pool=False)
 
@@ -132,25 +134,36 @@ def workspace_list() -> None:
     table.add_column("Name", style="bold white", no_wrap=True)
     table.add_column("Status", no_wrap=True)
     table.add_column("Template", style="dim")
+    table.add_column("Uptime", justify="right")
     table.add_column("CPU", justify="right")
     table.add_column("Memory", justify="right")
+    table.add_column("Usage", justify="right")
     table.add_column("Container ID", style="dim", no_wrap=True)
     table.add_column("Created", style="dim")
 
     for ws in workspaces:
-        status_text = _state_badge(ws.state)
-        # Try to get live container status from Docker
-        live_state = _get_live_state(ws.container_id)
-        if live_state and live_state != ws.state:
-            status_text = _state_badge(live_state)
+        live = _get_live_details(ws.container_id)
+        status_text = _state_badge(live.get("state", ws.state))
+        uptime = _format_uptime(live.get("uptime_seconds"))
+
+        stats = live.get("stats", {})
+        usage = "n/a"
+        cpu_display = str(ws.cpu)
+        mem_display = ws.memory
+        if stats:
+            cpu_display = f"{stats.get('cpu_pct', 0):.1f}%"
+            mem_pct = stats.get("mem_pct", 0.0)
+            usage = f"{stats.get('mem_usage_mb', 0):.1f}/{stats.get('mem_limit_mb', 0):.1f} MiB ({mem_pct:.1f}%)"
 
         created_str = ws.created_at[:16].replace("T", " ")  # "2025-01-01 12:00"
         table.add_row(
             ws.name,
             status_text,
             ws.template,
-            str(ws.cpu),
-            ws.memory,
+            uptime,
+            cpu_display,
+            mem_display,
+            usage,
             ws.container_id[:12],
             created_str,
         )
@@ -163,13 +176,16 @@ def workspace_list() -> None:
 # ---------------------------------------------------------------------------
 
 @workspace.command(name="connect")
-@click.argument("name")
-def workspace_connect(name: str) -> None:
-    """Open an interactive shell inside the workspace named NAME."""
+@click.argument("identifier")
+def workspace_connect(identifier: str) -> None:
+    """Open an interactive shell inside the workspace."""
     db = _get_db()
-    ws = db.get_workspace(name)
+    ws = _resolve_workspace_identifier(db, identifier)
     if not ws:
-        console.print(f"[bold red]Error:[/bold red] No workspace named '[cyan]{name}[/cyan]'.")
+        console.print(
+            f"[bold red]Error:[/bold red] No workspace matched '[cyan]{identifier}[/cyan]'. "
+            "Use a workspace name, UUID, or container ID prefix."
+        )
         sys.exit(1)
 
     container = dc.get_container(ws.container_id)
@@ -180,12 +196,12 @@ def workspace_connect(name: str) -> None:
 
     if container.status != "running":
         console.print(
-            f"[bold red]Error:[/bold red] Workspace [cyan]{name}[/cyan] is not running "
+            f"[bold red]Error:[/bold red] Workspace [cyan]{ws.name}[/cyan] is not running "
             f"(state: [yellow]{container.status}[/yellow])."
         )
         sys.exit(1)
 
-    console.print(f"[bold green]Connecting to workspace [cyan]{name}[/cyan]...[/bold green]")
+    console.print(f"[bold green]Connecting to workspace [cyan]{ws.name}[/cyan]...[/bold green]")
     console.print("[dim]Type [bold]exit[/bold] to disconnect.[/dim]\n")
     dc.exec_into_container(ws.container_id)
 
@@ -195,31 +211,34 @@ def workspace_connect(name: str) -> None:
 # ---------------------------------------------------------------------------
 
 @workspace.command(name="destroy")
-@click.argument("name")
+@click.argument("identifier")
 @click.option("--force", is_flag=True, default=False, help="Skip confirmation prompt")
-def workspace_destroy(name: str, force: bool) -> None:
-    """Tear down and remove the workspace named NAME."""
+def workspace_destroy(identifier: str, force: bool) -> None:
+    """Tear down and remove a workspace."""
     db = _get_db()
-    ws = db.get_workspace(name)
+    ws = _resolve_workspace_identifier(db, identifier)
     if not ws:
-        console.print(f"[bold red]Error:[/bold red] No workspace named '[cyan]{name}[/cyan]'.")
+        console.print(
+            f"[bold red]Error:[/bold red] No workspace matched '[cyan]{identifier}[/cyan]'. "
+            "Use a workspace name, UUID, or container ID prefix."
+        )
         sys.exit(1)
 
     if not force:
         click.confirm(
-            f"Destroy workspace '{name}' ({ws.container_id[:12]})? This cannot be undone.",
+            f"Destroy workspace '{ws.name}' ({ws.container_id[:12]})? This cannot be undone.",
             abort=True,
         )
 
-    with console.status(f"[bold red]Destroying workspace [cyan]{name}[/cyan]...[/bold red]"):
+    with console.status(f"[bold red]Destroying workspace [cyan]{ws.name}[/cyan]...[/bold red]"):
         try:
             dc.stop_and_remove_container(ws.container_id, force=force)
         except Exception as exc:
             console.print(f"[bold red]Error:[/bold red] Failed to remove container: {exc}")
             sys.exit(1)
-        db.delete_workspace(name)
+        db.delete_workspace(ws.name)
 
-    console.print(f"[bold green]✓[/bold green] Workspace [cyan]{name}[/cyan] destroyed.")
+    console.print(f"[bold green]✓[/bold green] Workspace [cyan]{ws.name}[/cyan] destroyed.")
 
 
 # ---------------------------------------------------------------------------
@@ -251,24 +270,23 @@ def pool_init(size: int, template: str) -> None:
     )
     console.print()
 
-    created = []
-    for i in range(size):
-        with console.status(f"[green]Creating pool container {i + 1}/{size}...[/green]"):
-            try:
-                records = pool_mgr.initialize(size=1, template=template)
-                created.extend(records)
-                r = records[0]
-                console.print(
-                    f"  [green]✓[/green] [dim]{r.name}[/dim] → [cyan]{r.container_id[:12]}[/cyan]"
-                )
-            except Exception as exc:
-                console.print(f"  [red]✗[/red] Failed: {exc}")
+    with console.status("[green]Preparing warm pool...[/green]"):
+        try:
+            created = pool_mgr.initialize(size=size, template=template)
+        except Exception as exc:
+            console.print(f"[bold red]Error:[/bold red] Failed to initialize pool: {exc}")
+            sys.exit(1)
+
+    for record in created:
+        console.print(
+            f"  [green]✓[/green] [dim]{record.name}[/dim] → [cyan]{record.container_id[:12]}[/cyan]"
+        )
 
     console.print()
     status = pool_mgr.status()
     console.print(
-        f"[bold green]Pool ready.[/bold green] "
-        f"{status.warm} warm container(s) available."
+        f"[bold green]Pool ready.[/bold green] {status.warm} warm container(s) available "
+        f"(target: {status.target}, template: {status.template})."
     )
 
 
@@ -291,6 +309,8 @@ def pool_status() -> None:
     table.add_row("Warm (ready to claim)", _count_badge(status.warm, "green"))
     table.add_row("In use (claimed)", _count_badge(status.in_use, "yellow"))
     table.add_row("Total pool containers", _count_badge(status.total, "cyan"))
+    table.add_row("Target size", _count_badge(status.target, "magenta"))
+    table.add_row("Template", f"[bold white]{status.template}[/bold white]")
 
     console.print(table)
 
@@ -342,15 +362,47 @@ def _count_badge(count: int, color: str) -> str:
     return f"[bold {color}]{count}[/bold {color}]"
 
 
-def _get_live_state(container_id: str) -> str | None:
-    """Query Docker for the live container state. Returns None on failure."""
+def _get_live_details(container_id: str) -> dict:
+    """Return best-effort container state, uptime, and stats."""
     try:
-        container = dc.get_container(container_id)
-        if container:
-            return container.status  # 'running', 'exited', etc.
-        return None
+        details = dc.get_container_runtime(container_id)
+        stats = dc.get_container_stats(container_id)
+        details["stats"] = stats
+        return details
     except Exception:
-        return None
+        return {}
+
+
+def _resolve_workspace_identifier(db: WorkspaceDB, identifier: str) -> WorkspaceRecord | None:
+    """Resolve by workspace name, UUID, or container ID prefix."""
+    by_name = db.get_workspace(identifier)
+    if by_name and not by_name.pool_member:
+        return by_name
+
+    by_id = db.get_workspace_by_id(identifier)
+    if by_id and not by_id.pool_member:
+        return by_id
+
+    all_workspaces = db.list_workspaces(include_pool=False)
+    matched = [ws for ws in all_workspaces if ws.container_id.startswith(identifier)]
+    if len(matched) == 1:
+        return matched[0]
+    return None
+
+
+def _format_uptime(seconds: int | None) -> str:
+    if seconds is None:
+        return "n/a"
+    days, rem = divmod(seconds, 86400)
+    hours, rem = divmod(rem, 3600)
+    minutes, secs = divmod(rem, 60)
+    if days:
+        return f"{days}d {hours}h"
+    if hours:
+        return f"{hours}h {minutes}m"
+    if minutes:
+        return f"{minutes}m {secs}s"
+    return f"{secs}s"
 
 
 def _print_workspace_info(ws: WorkspaceRecord) -> None:

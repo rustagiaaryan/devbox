@@ -1,0 +1,25 @@
+# Data service has a branch that can run in parallel and then merges.
+sh_library(
+    name = "data_lib",
+    srcs = ["data.sh"],
+    deps = [
+        "//lib/net:http",
+        "//lib/core:math",
+    ],
+)
+
+sh_library(
+    name = "cache_lib",
+    srcs = ["cache.sh"],
+    deps = ["//lib/core:config"],
+)
+
+sh_library(
+    name = "indexer",
+    srcs = ["indexer.sh"],
+    deps = [
+        ":data_lib",
+        ":cache_lib",
+        "//lib/net:gateway",
+    ],
+)

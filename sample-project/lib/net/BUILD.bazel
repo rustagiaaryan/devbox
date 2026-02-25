@@ -1,0 +1,27 @@
+# Network layer introduces fan-in and fan-out patterns.
+sh_library(
+    name = "http",
+    srcs = ["http.sh"],
+    deps = [
+        "//lib/core:config",
+        "//lib/utils:logging",
+    ],
+)
+
+sh_library(
+    name = "rpc",
+    srcs = ["rpc.sh"],
+    deps = [
+        "//lib/net:http",
+        "//lib/core:math",
+    ],
+)
+
+sh_library(
+    name = "gateway",
+    srcs = ["gateway.sh"],
+    deps = [
+        "//lib/net:rpc",
+        "//lib/core:runtime",
+    ],
+)

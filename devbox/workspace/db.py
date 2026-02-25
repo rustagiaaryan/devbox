@@ -1,9 +1,4 @@
-"""SQLite persistence for workspace state.
-
-Tracks container metadata so workspaces survive Docker daemon restarts
-and CLI invocations. All workspace state lives in a local SQLite file
-at ~/.devbox/workspaces.db by default.
-"""
+"""SQLite persistence for workspace state."""
 
 import sqlite3
 from dataclasses import dataclass
@@ -45,7 +40,7 @@ class WorkspaceDB:
         self.create_tables()
 
     def create_tables(self) -> None:
-        """Create the workspaces table if it doesn't exist."""
+        """Create persistence tables if they do not exist."""
         self._conn.execute("""
             CREATE TABLE IF NOT EXISTS workspaces (
                 id           TEXT PRIMARY KEY,
@@ -57,6 +52,12 @@ class WorkspaceDB:
                 pool_member  INTEGER NOT NULL DEFAULT 0,
                 cpu          INTEGER NOT NULL DEFAULT 2,
                 memory       TEXT NOT NULL DEFAULT '4g'
+            )
+        """)
+        self._conn.execute("""
+            CREATE TABLE IF NOT EXISTS settings (
+                key   TEXT PRIMARY KEY,
+                value TEXT NOT NULL
             )
         """)
         self._conn.commit()
@@ -134,6 +135,51 @@ class WorkspaceDB:
         counts["total"] = total
         return counts
 
+    def set_setting(self, key: str, value: str) -> None:
+        """Persist a key/value setting."""
+        self._conn.execute(
+            """
+            INSERT INTO settings(key, value)
+            VALUES(?, ?)
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value
+            """,
+            (key, value),
+        )
+        self._conn.commit()
+
+    def get_setting(self, key: str, default: str | None = None) -> str | None:
+        """Return a setting value or `default` when missing."""
+        row = self._conn.execute(
+            "SELECT value FROM settings WHERE key = ?",
+            (key,),
+        ).fetchone()
+        if not row:
+            return default
+        return row["value"]
+
+    def set_pool_target(self, size: int) -> None:
+        """Persist desired warm pool size."""
+        self.set_setting("pool.target_size", str(size))
+
+    def get_pool_target(self, default: int = 0) -> int:
+        """Return desired warm pool size."""
+        value = self.get_setting("pool.target_size")
+        if value is None:
+            return default
+        try:
+            return int(value)
+        except ValueError:
+            return default
+
+    def set_pool_template(self, template: str) -> None:
+        """Persist template used for warm pool replenishment."""
+        self.set_setting("pool.template", template)
+
+    def get_pool_template(self, default: str = "base") -> str:
+        """Return template used for warm pool replenishment."""
+        value = self.get_setting("pool.template")
+        return value if value else default
+
     def update_state(self, name: str, state: str) -> None:
         """Update the state of a workspace by name."""
         self._conn.execute(
@@ -148,26 +194,65 @@ class WorkspaceDB:
         )
         self._conn.commit()
 
-    def claim_pool_member(self, new_name: str) -> WorkspaceRecord | None:
-        """Atomically claim the oldest warm-pool container.
+    def claim_pool_member(
+        self,
+        new_name: str,
+        template: str | None = None,
+    ) -> tuple[WorkspaceRecord, str] | None:
+        """Atomically claim the oldest warm pool member.
 
-        Renames it to new_name, marks it as running, and removes the
-        pool_member flag. Returns the updated record, or None if pool is empty.
+        Returns:
+            `(record, old_name)` when successful, else `None`.
         """
-        row = self._conn.execute(
-            "SELECT * FROM workspaces WHERE pool_member = 1 AND state = ? ORDER BY created_at ASC LIMIT 1",
-            (STATE_POOL,),
-        ).fetchone()
+        self._conn.execute("BEGIN IMMEDIATE")
+        if template:
+            row = self._conn.execute(
+                """
+                SELECT * FROM workspaces
+                WHERE pool_member = 1 AND state = ? AND template = ?
+                ORDER BY created_at ASC
+                LIMIT 1
+                """,
+                (STATE_POOL, template),
+            ).fetchone()
+        else:
+            row = self._conn.execute(
+                """
+                SELECT * FROM workspaces
+                WHERE pool_member = 1 AND state = ?
+                ORDER BY created_at ASC
+                LIMIT 1
+                """,
+                (STATE_POOL,),
+            ).fetchone()
+
         if not row:
+            self._conn.execute("COMMIT")
             return None
 
         ws_id = row["id"]
+        old_name = row["name"]
         self._conn.execute(
             "UPDATE workspaces SET name = ?, state = ?, pool_member = 0 WHERE id = ?",
             (new_name, STATE_RUNNING, ws_id),
         )
         self._conn.commit()
-        return self.get_workspace_by_id(ws_id)
+        claimed = self.get_workspace_by_id(ws_id)
+        if not claimed:
+            return None
+        return claimed, old_name
+
+    def restore_pool_member(self, workspace_id: str, old_name: str) -> None:
+        """Roll back a failed pool claim."""
+        self._conn.execute(
+            """
+            UPDATE workspaces
+            SET name = ?, state = ?, pool_member = 1
+            WHERE id = ?
+            """,
+            (old_name, STATE_POOL, workspace_id),
+        )
+        self._conn.commit()
 
     def delete_workspace(self, name: str) -> None:
         """Delete a workspace record by name."""

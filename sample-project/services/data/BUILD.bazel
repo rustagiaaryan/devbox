@@ -1,23 +1,25 @@
 # Data service has a branch that can run in parallel and then merges.
-sh_library(
+filegroup(
     name = "data_lib",
-    srcs = ["data.sh"],
-    deps = [
+    srcs = [
+        "data.sh",
         "//lib/net:http",
         "//lib/core:math",
     ],
 )
 
-sh_library(
+filegroup(
     name = "cache_lib",
-    srcs = ["cache.sh"],
-    deps = ["//lib/core:config"],
+    srcs = [
+        "cache.sh",
+        "//lib/core:config",
+    ],
 )
 
-sh_library(
+filegroup(
     name = "indexer",
-    srcs = ["indexer.sh"],
-    deps = [
+    srcs = [
+        "indexer.sh",
         ":data_lib",
         ":cache_lib",
         "//lib/net:gateway",

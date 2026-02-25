@@ -1,27 +1,27 @@
 # Top-level binaries depend on shared services and infra.
-sh_binary(
+filegroup(
     name = "cli",
-    srcs = ["cli.sh"],
-    deps = [
+    srcs = [
+        "cli.sh",
         "//services/auth:auth_lib",
         "//services/data:data_lib",
         "//lib/utils:logging",
     ],
 )
 
-sh_binary(
+filegroup(
     name = "worker",
-    srcs = ["worker.sh"],
-    deps = [
+    srcs = [
+        "worker.sh",
         "//services/data:indexer",
         "//lib/net:rpc",
     ],
 )
 
-sh_test(
+filegroup(
     name = "integration_test",
-    srcs = ["integration_test.sh"],
-    data = [
+    srcs = [
+        "integration_test.sh",
         ":cli",
         ":worker",
     ],

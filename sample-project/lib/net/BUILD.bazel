@@ -1,26 +1,26 @@
 # Network layer introduces fan-in and fan-out patterns.
-sh_library(
+filegroup(
     name = "http",
-    srcs = ["http.sh"],
-    deps = [
+    srcs = [
+        "http.sh",
         "//lib/core:config",
         "//lib/utils:logging",
     ],
 )
 
-sh_library(
+filegroup(
     name = "rpc",
-    srcs = ["rpc.sh"],
-    deps = [
+    srcs = [
+        "rpc.sh",
         "//lib/net:http",
         "//lib/core:math",
     ],
 )
 
-sh_library(
+filegroup(
     name = "gateway",
-    srcs = ["gateway.sh"],
-    deps = [
+    srcs = [
+        "gateway.sh",
         "//lib/net:rpc",
         "//lib/core:runtime",
     ],

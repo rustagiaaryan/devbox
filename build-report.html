@@ -1,0 +1,245 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>devbox Build Graph Report</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    :root {
+      --bg: #f8fafc;
+      --panel: #ffffff;
+      --ink: #0f172a;
+      --line: #cbd5e1;
+      --accent: #0ea5e9;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: radial-gradient(circle at top right, #e2e8f0, var(--bg));
+      color: var(--ink);
+      font-family: "IBM Plex Sans", "Avenir Next", "Segoe UI", sans-serif;
+    }
+    .layout {
+      display: grid;
+      grid-template-columns: 320px 1fr;
+      gap: 14px;
+      min-height: 100vh;
+      padding: 14px;
+    }
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 14px;
+      box-shadow: 0 6px 20px rgba(15, 23, 42, 0.06);
+    }
+    .title {
+      margin: 0 0 10px;
+      font-size: 18px;
+      letter-spacing: 0.2px;
+    }
+    .stat {
+      display: flex;
+      justify-content: space-between;
+      margin: 6px 0;
+      font-size: 14px;
+    }
+    .stat strong {
+      color: var(--accent);
+    }
+    .list {
+      margin: 8px 0 0;
+      padding-left: 16px;
+      font-size: 13px;
+      line-height: 1.4;
+    }
+    .graph-wrap {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      overflow: hidden;
+      position: relative;
+      min-height: 72vh;
+    }
+    .legend {
+      position: absolute;
+      right: 10px;
+      top: 10px;
+      background: rgba(255, 255, 255, 0.94);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 8px 10px;
+      font-size: 12px;
+    }
+    .chip {
+      display: inline-block;
+      width: 10px;
+      height: 10px;
+      border-radius: 999px;
+      margin-right: 6px;
+      vertical-align: middle;
+    }
+    #graph {
+      width: 100%;
+      height: 100%;
+      min-height: 72vh;
+      background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+      cursor: grab;
+    }
+    #graph.dragging { cursor: grabbing; }
+    .node-label {
+      font-size: 12px;
+      fill: #0f172a;
+      pointer-events: none;
+    }
+    @media (max-width: 980px) {
+      .layout {
+        grid-template-columns: 1fr;
+      }
+      .graph-wrap {
+        min-height: 60vh;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="layout">
+    <aside class="panel">
+      <h1 class="title">Build Analyzer Report</h1>
+      <div class="stat"><span>Targets</span><strong id="targets"></strong></div>
+      <div class="stat"><span>Edges</span><strong id="edges"></strong></div>
+      <div class="stat"><span>Critical Path</span><strong id="critical-len"></strong></div>
+      <div class="stat"><span>Parallelism</span><strong id="parallelism"></strong></div>
+      <div class="stat"><span>Root Targets</span><strong id="roots"></strong></div>
+      <div class="stat"><span>Leaf Targets</span><strong id="leaves"></strong></div>
+      <h3 class="title" style="font-size:15px;margin-top:18px;">Critical Path</h3>
+      <ol class="list" id="critical-path"></ol>
+      <h3 class="title" style="font-size:15px;margin-top:18px;">Top Bottlenecks</h3>
+      <ol class="list" id="bottlenecks"></ol>
+    </aside>
+    <main class="graph-wrap">
+      <div class="legend">
+        <div><span class="chip" style="background:#ef4444;"></span>Critical path</div>
+        <div><span class="chip" style="background:#f59e0b;"></span>Bottleneck</div>
+        <div><span class="chip" style="background:#3b82f6;"></span>Other target</div>
+      </div>
+      <svg id="graph">
+        <defs>
+          <marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="3.5" orient="auto">
+            <polygon points="0 0, 8 3.5, 0 7" fill="#94a3b8"></polygon>
+          </marker>
+        </defs>
+        <g id="viewport"></g>
+      </svg>
+    </main>
+  </div>
+  <script>
+    const nodes = [{"id": "//app:integration_test", "label": "//app:integration_test", "x": 120, "y": 100, "color": "#ef4444", "border": "#7f1d1d"}, {"id": "//app:cli", "label": "//app:cli", "x": 400, "y": 100, "color": "#f59e0b", "border": "#92400e"}, {"id": "//app:integration_test.sh", "label": "//app:integration_test.sh", "x": 400, "y": 200, "color": "#3b82f6", "border": "#1e3a8a"}, {"id": "//app:worker", "label": "//app:worker", "x": 400, "y": 300, "color": "#ef4444", "border": "#7f1d1d"}, {"id": "//app:cli.sh", "label": "//app:cli.sh", "x": 680, "y": 100, "color": "#3b82f6", "border": "#1e3a8a"}, {"id": "//app:worker.sh", "label": "//app:worker.sh", "x": 680, "y": 200, "color": "#3b82f6", "border": "#1e3a8a"}, {"id": "//services/auth:auth_lib", "label": "//services/auth:auth_lib", "x": 680, "y": 300, "color": "#3b82f6", "border": "#1e3a8a"}, {"id": "//services/data:indexer", "label": "//services/data:indexer", "x": 680, "y": 400, "color": "#ef4444", "border": "#7f1d1d"}, {"id": "//lib/net:gateway", "label": "//lib/net:gateway", "x": 960, "y": 100, "color": "#ef4444", "border": "#7f1d1d"}, {"id": "//services/auth:auth.sh", "label": "//services/auth:auth.sh", "x": 960, "y": 200, "color": "#3b82f6", "border": "#1e3a8a"}, {"id": "//services/data:cache_lib", "label": "//services/data:cache_lib", "x": 960, "y": 300, "color": "#3b82f6", "border": "#1e3a8a"}, {"id": "//services/data:data_lib", "label": "//services/data:data_lib", "x": 960, "y": 400, "color": "#f59e0b", "border": "#92400e"}, {"id": "//services/data:indexer.sh", "label": "//services/data:indexer.sh", "x": 960, "y": 500, "color": "#3b82f6", "border": "#1e3a8a"}, {"id": "//lib/core:runtime", "label": "//lib/core:runtime", "x": 1240, "y": 100, "color": "#3b82f6", "border": "#1e3a8a"}, {"id": "//lib/net:gateway.sh", "label": "//lib/net:gateway.sh", "x": 1240, "y": 200, "color": "#3b82f6", "border": "#1e3a8a"}, {"id": "//lib/net:rpc", "label": "//lib/net:rpc", "x": 1240, "y": 300, "color": "#ef4444", "border": "#7f1d1d"}, {"id": "//services/data:cache.sh", "label": "//services/data:cache.sh", "x": 1240, "y": 400, "color": "#3b82f6", "border": "#1e3a8a"}, {"id": "//services/data:data.sh", "label": "//services/data:data.sh", "x": 1240, "y": 500, "color": "#3b82f6", "border": "#1e3a8a"}, {"id": "//lib/core:math", "label": "//lib/core:math", "x": 1520, "y": 100, "color": "#3b82f6", "border": "#1e3a8a"}, {"id": "//lib/core:runtime.sh", "label": "//lib/core:runtime.sh", "x": 1520, "y": 200, "color": "#3b82f6", "border": "#1e3a8a"}, {"id": "//lib/net:http", "label": "//lib/net:http", "x": 1520, "y": 300, "color": "#ef4444", "border": "#7f1d1d"}, {"id": "//lib/net:rpc.sh", "label": "//lib/net:rpc.sh", "x": 1520, "y": 400, "color": "#3b82f6", "border": "#1e3a8a"}, {"id": "//lib/utils:time", "label": "//lib/utils:time", "x": 1520, "y": 500, "color": "#3b82f6", "border": "#1e3a8a"}, {"id": "//lib/core:config", "label": "//lib/core:config", "x": 1800, "y": 100, "color": "#ef4444", "border": "#7f1d1d"}, {"id": "//lib/core:math.sh", "label": "//lib/core:math.sh", "x": 1800, "y": 200, "color": "#3b82f6", "border": "#1e3a8a"}, {"id": "//lib/net:http.sh", "label": "//lib/net:http.sh", "x": 1800, "y": 300, "color": "#3b82f6", "border": "#1e3a8a"}, {"id": "//lib/utils:strings", "label": "//lib/utils:strings", "x": 1800, "y": 400, "color": "#3b82f6", "border": "#1e3a8a"}, {"id": "//lib/utils:time.sh", "label": "//lib/utils:time.sh", "x": 1800, "y": 500, "color": "#3b82f6", "border": "#1e3a8a"}, {"id": "//lib/core:config.sh", "label": "//lib/core:config.sh", "x": 2080, "y": 100, "color": "#3b82f6", "border": "#1e3a8a"}, {"id": "//lib/utils:logging", "label": "//lib/utils:logging", "x": 2080, "y": 200, "color": "#ef4444", "border": "#7f1d1d"}, {"id": "//lib/utils:strings.sh", "label": "//lib/utils:strings.sh", "x": 2080, "y": 300, "color": "#3b82f6", "border": "#1e3a8a"}, {"id": "//lib/utils:logging.sh", "label": "//lib/utils:logging.sh", "x": 2360, "y": 100, "color": "#ef4444", "border": "#7f1d1d"}];
+    const edges = [{"source": "//app:integration_test", "target": "//app:integration_test.sh", "color": "#94a3b8", "width": 1.4}, {"source": "//app:integration_test", "target": "//app:cli", "color": "#94a3b8", "width": 1.4}, {"source": "//app:integration_test", "target": "//app:worker", "color": "#ef4444", "width": 3}, {"source": "//app:cli", "target": "//app:cli.sh", "color": "#94a3b8", "width": 1.4}, {"source": "//app:cli", "target": "//services/auth:auth_lib", "color": "#94a3b8", "width": 1.4}, {"source": "//app:cli", "target": "//lib/utils:logging", "color": "#94a3b8", "width": 1.4}, {"source": "//app:cli", "target": "//services/data:data_lib", "color": "#94a3b8", "width": 1.4}, {"source": "//app:worker", "target": "//app:worker.sh", "color": "#94a3b8", "width": 1.4}, {"source": "//app:worker", "target": "//services/data:indexer", "color": "#ef4444", "width": 3}, {"source": "//app:worker", "target": "//lib/net:rpc", "color": "#94a3b8", "width": 1.4}, {"source": "//services/data:indexer", "target": "//services/data:indexer.sh", "color": "#94a3b8", "width": 1.4}, {"source": "//services/data:indexer", "target": "//services/data:data_lib", "color": "#94a3b8", "width": 1.4}, {"source": "//services/data:indexer", "target": "//services/data:cache_lib", "color": "#94a3b8", "width": 1.4}, {"source": "//services/data:indexer", "target": "//lib/net:gateway", "color": "#ef4444", "width": 3}, {"source": "//lib/net:rpc", "target": "//lib/net:rpc.sh", "color": "#94a3b8", "width": 1.4}, {"source": "//lib/net:rpc", "target": "//lib/net:http", "color": "#ef4444", "width": 3}, {"source": "//lib/net:rpc", "target": "//lib/core:math", "color": "#94a3b8", "width": 1.4}, {"source": "//services/auth:auth_lib", "target": "//services/auth:auth.sh", "color": "#94a3b8", "width": 1.4}, {"source": "//services/auth:auth_lib", "target": "//lib/net:rpc", "color": "#94a3b8", "width": 1.4}, {"source": "//services/auth:auth_lib", "target": "//lib/core:config", "color": "#94a3b8", "width": 1.4}, {"source": "//lib/utils:logging", "target": "//lib/utils:logging.sh", "color": "#ef4444", "width": 3}, {"source": "//services/data:data_lib", "target": "//services/data:data.sh", "color": "#94a3b8", "width": 1.4}, {"source": "//services/data:data_lib", "target": "//lib/net:http", "color": "#94a3b8", "width": 1.4}, {"source": "//services/data:data_lib", "target": "//lib/core:math", "color": "#94a3b8", "width": 1.4}, {"source": "//lib/core:config", "target": "//lib/core:config.sh", "color": "#94a3b8", "width": 1.4}, {"source": "//lib/core:config", "target": "//lib/utils:logging", "color": "#ef4444", "width": 3}, {"source": "//services/data:cache_lib", "target": "//services/data:cache.sh", "color": "#94a3b8", "width": 1.4}, {"source": "//services/data:cache_lib", "target": "//lib/core:config", "color": "#94a3b8", "width": 1.4}, {"source": "//lib/net:gateway", "target": "//lib/net:gateway.sh", "color": "#94a3b8", "width": 1.4}, {"source": "//lib/net:gateway", "target": "//lib/net:rpc", "color": "#ef4444", "width": 3}, {"source": "//lib/net:gateway", "target": "//lib/core:runtime", "color": "#94a3b8", "width": 1.4}, {"source": "//lib/core:runtime", "target": "//lib/core:runtime.sh", "color": "#94a3b8", "width": 1.4}, {"source": "//lib/core:runtime", "target": "//lib/core:config", "color": "#94a3b8", "width": 1.4}, {"source": "//lib/core:runtime", "target": "//lib/utils:time", "color": "#94a3b8", "width": 1.4}, {"source": "//lib/utils:time", "target": "//lib/utils:time.sh", "color": "#94a3b8", "width": 1.4}, {"source": "//lib/net:http", "target": "//lib/net:http.sh", "color": "#94a3b8", "width": 1.4}, {"source": "//lib/net:http", "target": "//lib/core:config", "color": "#ef4444", "width": 3}, {"source": "//lib/net:http", "target": "//lib/utils:logging", "color": "#94a3b8", "width": 1.4}, {"source": "//lib/core:math", "target": "//lib/core:math.sh", "color": "#94a3b8", "width": 1.4}, {"source": "//lib/core:math", "target": "//lib/utils:strings", "color": "#94a3b8", "width": 1.4}, {"source": "//lib/utils:strings", "target": "//lib/utils:strings.sh", "color": "#94a3b8", "width": 1.4}];
+    const metrics = {"node_count": 32, "edge_count": 41, "critical_path_length": 9, "parallelism_factor": 3.56, "root_targets": 1, "leaf_targets": 16, "critical_path": ["//app:integration_test", "//app:worker", "//services/data:indexer", "//lib/net:gateway", "//lib/net:rpc", "//lib/net:http", "//lib/core:config", "//lib/utils:logging", "//lib/utils:logging.sh"], "bottlenecks": [{"target": "//lib/core:config", "score": 6, "in_degree": 4, "out_degree": 2}, {"target": "//lib/net:rpc", "score": 6, "in_degree": 3, "out_degree": 3}, {"target": "//services/data:data_lib", "score": 5, "in_degree": 2, "out_degree": 3}, {"target": "//lib/net:http", "score": 5, "in_degree": 2, "out_degree": 3}, {"target": "//app:cli", "score": 5, "in_degree": 1, "out_degree": 4}]};
+
+    document.getElementById("targets").textContent = metrics.node_count;
+    document.getElementById("edges").textContent = metrics.edge_count;
+    document.getElementById("critical-len").textContent = metrics.critical_path_length;
+    document.getElementById("parallelism").textContent = `${metrics.parallelism_factor}x`;
+    document.getElementById("roots").textContent = metrics.root_targets;
+    document.getElementById("leaves").textContent = metrics.leaf_targets;
+
+    const criticalList = document.getElementById("critical-path");
+    metrics.critical_path.forEach((target) => {
+      const li = document.createElement("li");
+      li.textContent = target;
+      criticalList.appendChild(li);
+    });
+
+    const bottleneckList = document.getElementById("bottlenecks");
+    metrics.bottlenecks.forEach((item) => {
+      const li = document.createElement("li");
+      li.textContent = `${item.target} (score=${item.score}, in=${item.in_degree}, out=${item.out_degree})`;
+      bottleneckList.appendChild(li);
+    });
+
+    const svg = document.getElementById("graph");
+    const viewport = document.getElementById("viewport");
+    const nodeById = Object.fromEntries(nodes.map((n) => [n.id, n]));
+
+    const maxX = Math.max(140, ...nodes.map((n) => n.x)) + 340;
+    const maxY = Math.max(160, ...nodes.map((n) => n.y)) + 220;
+    svg.setAttribute("viewBox", `0 0 ${maxX} ${maxY}`);
+
+    edges.forEach((edge) => {
+      const source = nodeById[edge.source];
+      const target = nodeById[edge.target];
+      if (!source || !target) return;
+      const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+      line.setAttribute("x1", source.x + 92);
+      line.setAttribute("y1", source.y + 12);
+      line.setAttribute("x2", target.x - 6);
+      line.setAttribute("y2", target.y + 12);
+      line.setAttribute("stroke", edge.color);
+      line.setAttribute("stroke-width", edge.width);
+      line.setAttribute("marker-end", "url(#arrow)");
+      line.setAttribute("opacity", "0.85");
+      viewport.appendChild(line);
+    });
+
+    nodes.forEach((node) => {
+      const group = document.createElementNS("http://www.w3.org/2000/svg", "g");
+      const rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+      rect.setAttribute("x", node.x);
+      rect.setAttribute("y", node.y);
+      rect.setAttribute("rx", "10");
+      rect.setAttribute("width", "170");
+      rect.setAttribute("height", "24");
+      rect.setAttribute("fill", node.color);
+      rect.setAttribute("stroke", node.border);
+      rect.setAttribute("stroke-width", "1.4");
+      const label = document.createElementNS("http://www.w3.org/2000/svg", "text");
+      label.setAttribute("x", node.x + 8);
+      label.setAttribute("y", node.y + 16);
+      label.setAttribute("class", "node-label");
+      label.textContent = node.label;
+      group.appendChild(rect);
+      group.appendChild(label);
+      viewport.appendChild(group);
+    });
+
+    let scale = 1;
+    let panX = 0;
+    let panY = 0;
+    let dragging = false;
+    let dragStart = null;
+
+    const applyTransform = () => {
+      viewport.setAttribute("transform", `translate(${panX}, ${panY}) scale(${scale})`);
+    };
+
+    svg.addEventListener("wheel", (event) => {
+      event.preventDefault();
+      const delta = event.deltaY < 0 ? 1.08 : 0.92;
+      scale = Math.min(3, Math.max(0.35, scale * delta));
+      applyTransform();
+    });
+
+    svg.addEventListener("mousedown", (event) => {
+      dragging = true;
+      dragStart = { x: event.clientX, y: event.clientY };
+      svg.classList.add("dragging");
+    });
+
+    window.addEventListener("mousemove", (event) => {
+      if (!dragging || !dragStart) return;
+      panX += (event.clientX - dragStart.x);
+      panY += (event.clientY - dragStart.y);
+      dragStart = { x: event.clientX, y: event.clientY };
+      applyTransform();
+    });
+
+    window.addEventListener("mouseup", () => {
+      dragging = false;
+      dragStart = null;
+      svg.classList.remove("dragging");
+    });
+  </script>
+</body>
+</html>

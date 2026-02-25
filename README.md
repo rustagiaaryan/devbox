@@ -1,12 +1,12 @@
 # devbox
 
-A developer toolbox CLI demonstrating concepts from Snowflake's Developer Experience (DevEx) team. Built in Python with three integrated capabilities:
+A developer toolbox CLI for workspace provisioning, build-graph analysis, and AI-assisted diagnostics.
 
-| Component | Mirrors | What it does |
-|---|---|---|
-| `devbox workspace` | Cloud Workspaces | Spin up Docker-based dev environments with warm-pool provisioning |
-| `devbox build-analyzer` | Bazel Build Infra | Analyze dependency graphs, find critical paths and bottlenecks |
-| `devbox ai-diagnose` | AI Integration | Pipe build output to Claude for AI-powered root-cause diagnosis |
+| Component | What it does |
+|---|---|
+| `devbox workspace` | Spin up Docker-based dev environments with warm-pool provisioning |
+| `devbox build-analyzer` | Analyze dependency graphs, find critical paths and bottlenecks |
+| `devbox ai-diagnose` | Pipe build output to Claude for AI-powered root-cause diagnosis |
 
 ## Architecture
 
@@ -73,7 +73,7 @@ bazel build //... 2>&1 | devbox ai-diagnose diagnose   # pipe from stdin
 devbox ai-diagnose diagnose build.log                   # from file
 devbox ai-diagnose diagnose --dry-run                   # demo mode, no API call
 devbox ai-diagnose diagnose --history                   # show past diagnoses
-devbox ai-diagnose diagnose --patterns                  # group by failure type
+devbox ai-diagnose diagnose --patterns                  # group by failure type + target
 ```
 
 ## Development Status
@@ -81,9 +81,9 @@ devbox ai-diagnose diagnose --patterns                  # group by failure type
 | Phase | Status | Description |
 |---|---|---|
 | 1 | ✅ Complete | Project scaffolding and CLI skeleton |
-| 2 | 🔜 Planned | Workspace provisioner with Docker and warm pool |
-| 3 | 🔜 Planned | Bazel build graph analyzer and HTML visualizer |
-| 4 | 🔜 Planned | AI diagnosis with Claude API and SQLite history |
+| 2 | ✅ Complete | Workspace provisioner with Docker warm pool and metrics |
+| 3 | ✅ Complete | Build graph analyzer with HTML visualization |
+| 4 | ✅ Complete | AI diagnosis with Claude API and SQLite history/patterns |
 
 ## Tech Stack
 

@@ -5,6 +5,8 @@ inspecting, and destroying workspace containers. All container-level
 Docker calls go through this module — command logic stays in commands.py.
 """
 
+import os
+import platform
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -17,6 +19,20 @@ from docker.models.containers import Container
 # Label applied to every devbox-managed container so we can filter them.
 DEVBOX_LABEL = "devbox.managed"
 DEVBOX_LABEL_VALUE = "true"
+
+
+def host_docker_platform() -> str | None:
+    """Return preferred Docker platform for this host."""
+    override = os.getenv("DEVBOX_DOCKER_PLATFORM")
+    if override:
+        return override
+
+    machine = platform.machine().lower()
+    if machine in {"arm64", "aarch64"}:
+        return "linux/arm64"
+    if machine in {"x86_64", "amd64"}:
+        return "linux/amd64"
+    return None
 
 
 def get_client() -> docker.DockerClient:
@@ -64,6 +80,7 @@ def create_container(
     """
     client = get_client()
     image = ensure_template_image(client, template)
+    runtime_platform = host_docker_platform()
 
     container = client.containers.run(
         image=image,
@@ -82,6 +99,7 @@ def create_container(
         },
         # Give the container a writable home directory
         working_dir="/workspace",
+        platform=runtime_platform,
     )
     return container
 
@@ -243,16 +261,20 @@ def _template_dockerfile(template: str) -> Path:
 
 def ensure_template_image(client: docker.DockerClient, template: str) -> str:
     """Build or pull image for a template and return the image tag."""
+    runtime_platform = host_docker_platform()
     dockerfile = _template_dockerfile(template)
     if dockerfile.exists():
         tag = f"devbox-template-{template}:latest"
         from devbox.utils.console import console
         console.print(f"[dim]Building local template image [cyan]{tag}[/cyan]...[/dim]")
-        client.images.build(
-            path=str(dockerfile.parent),
-            tag=tag,
-            rm=True,
-        )
+        build_kwargs = {
+            "path": str(dockerfile.parent),
+            "tag": tag,
+            "rm": True,
+        }
+        if runtime_platform:
+            build_kwargs["platform"] = runtime_platform
+        client.images.build(**build_kwargs)
         return tag
 
     image = resolve_template_image(template)
@@ -261,7 +283,10 @@ def ensure_template_image(client: docker.DockerClient, template: str) -> str:
     except docker.errors.ImageNotFound:
         from devbox.utils.console import console
         console.print(f"[dim]Pulling image [cyan]{image}[/cyan]...[/dim]")
-        client.images.pull(image)
+        pull_kwargs = {"repository": image}
+        if runtime_platform:
+            pull_kwargs["platform"] = runtime_platform
+        client.images.pull(**pull_kwargs)
     return image
 
 

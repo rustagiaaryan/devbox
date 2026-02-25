@@ -1,12 +1,20 @@
 """SQLite persistence for workspace state."""
 
 import sqlite3
+import os
 from dataclasses import dataclass
 from pathlib import Path
 
 
-# Default DB location: ~/.devbox/workspaces.db
-DEFAULT_DB_PATH = Path.home() / ".devbox" / "workspaces.db"
+def _default_db_path() -> Path:
+    base = os.getenv("DEVBOX_DB_DIR")
+    if base:
+        return Path(base) / "workspaces.db"
+    return Path.home() / ".devbox" / "workspaces.db"
+
+
+# Default DB location: $DEVBOX_DB_DIR/workspaces.db or ~/.devbox/workspaces.db
+DEFAULT_DB_PATH = _default_db_path()
 
 # Valid workspace states
 STATE_RUNNING = "running"
@@ -34,8 +42,14 @@ class WorkspaceDB:
 
     def __init__(self, db_path: Path = DEFAULT_DB_PATH) -> None:
         self.db_path = db_path
-        db_path.parent.mkdir(parents=True, exist_ok=True)
-        self._conn = sqlite3.connect(str(db_path), check_same_thread=False)
+        try:
+            db_path.parent.mkdir(parents=True, exist_ok=True)
+            self._conn = sqlite3.connect(str(db_path), check_same_thread=False)
+        except (OSError, sqlite3.OperationalError):
+            fallback = Path.cwd() / ".devbox" / db_path.name
+            fallback.parent.mkdir(parents=True, exist_ok=True)
+            self.db_path = fallback
+            self._conn = sqlite3.connect(str(fallback), check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
         self.create_tables()
 

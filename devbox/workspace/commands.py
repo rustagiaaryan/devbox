@@ -258,8 +258,7 @@ def pool() -> None:
 def pool_init(size: int, template: str) -> None:
     """Pre-create SIZE idle containers for instant workspace provisioning.
 
-    Mirrors the warm pool strategy used in Snowflake's Cloud Workspaces,
-    where containers are kept ready so `workspace create` returns in seconds.
+    Keeps containers pre-created so `workspace create` returns quickly.
     """
     db = _get_db()
     pool_mgr = PoolManager(db)

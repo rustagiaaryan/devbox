@@ -13,8 +13,8 @@ from devbox.ai_diagnose.commands import ai_diagnose
 def cli() -> None:
     """devbox — developer toolbox for workspaces, build analysis, and AI diagnostics.
 
-    A demonstration of Snowflake DevEx concepts: warm-pool workspace provisioning,
-    Bazel build graph analysis, and AI-powered failure diagnosis.
+    Demonstrates warm-pool workspace provisioning, Bazel dependency analysis,
+    and AI-powered failure diagnosis.
     """
     # Load .env if present so subcommands can access ANTHROPIC_API_KEY etc.
     # Silently no-ops if .env does not exist.

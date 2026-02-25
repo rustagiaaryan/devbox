@@ -1,13 +1,12 @@
 # devbox
 
-`devbox` is a Python CLI for developer productivity workflows.
+I built `devbox` as a Python CLI for developer productivity workflows!
 
-It demonstrates three core capabilities:
+It has three core capabilities:
 - Fast containerized workspaces with warm-pool provisioning
 - Bazel dependency-graph analysis (critical path + bottlenecks)
 - AI-assisted build failure diagnosis with local history/pattern tracking
 
-The project is designed as a polished demo: practical to run locally, but structured like a real internal developer tooling system.
 
 ## What You Can Do
 

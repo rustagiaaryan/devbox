@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "devbox"
+version = "0.1.0"
+description = "Developer toolbox CLI for workspaces, build analysis, and AI diagnostics"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "Aaryan Rustagi" }]
+dependencies = [
+  "click>=8.0",
+  "rich>=13.0",
+  "docker>=7.0",
+  "networkx>=3.0",
+  "anthropic>=0.25",
+  "python-dotenv>=1.0",
+]
+
+[project.scripts]
+devbox = "devbox.cli:cli"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["devbox*"]

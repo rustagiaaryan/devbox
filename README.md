@@ -281,8 +281,3 @@ Missing API key for real AI diagnose:
 
 - Set `ANTHROPIC_API_KEY` in `.env`
 - Or use `--dry-run` for offline demo mode
-
-## Notes
-
-- This is a local demo project focused on clarity and architecture.
-- The warm-pool, graph analysis, and diagnosis patterns are intentionally designed to be understandable and easy to demonstrate.

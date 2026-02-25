@@ -6,3 +6,4 @@ bazel-*
 *.egg-info/
 .devbox/
 .devbox-*/
+build-report*.html

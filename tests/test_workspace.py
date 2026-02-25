@@ -91,12 +91,28 @@ class PoolManagerTests(unittest.TestCase):
             pool.initialize(size=1, template="base")
 
         with patch("devbox.workspace.pool.dc.rename_container", side_effect=RuntimeError("rename failed")):
-            claimed = pool.acquire("dev-1", template="base")
+            with patch("devbox.workspace.pool.dc.get_container", return_value=SimpleNamespace(status="running")):
+                claimed = pool.acquire("dev-1", template="base")
 
         self.assertIsNone(claimed)
         members = self.db.list_pool_members()
         self.assertEqual(len(members), 1)
         self.assertTrue(members[0].name.startswith("devbox-pool-"))
+
+    def test_acquire_prunes_stale_pool_members(self) -> None:
+        pool = PoolManager(self.db)
+
+        with patch("devbox.workspace.pool.dc.create_container") as create_container:
+            create_container.return_value = SimpleNamespace(id="container-1")
+            pool.initialize(size=1, template="base")
+
+        with patch("devbox.workspace.pool.dc.get_container", return_value=None):
+            with patch.object(pool, "_replenish_async") as replenish_async:
+                claimed = pool.acquire("dev-1", template="base")
+
+        self.assertIsNone(claimed)
+        self.assertEqual(len(self.db.list_pool_members()), 0)
+        replenish_async.assert_called_once()
 
 
 class WorkspaceCommandHelpersTests(unittest.TestCase):

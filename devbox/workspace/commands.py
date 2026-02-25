@@ -79,7 +79,7 @@ def workspace_create(name: str, template: str, cpu: int, memory: str) -> None:
         return
 
     # --- Slow path: cold-start a new container ---
-    console.print("[dim]Pool is empty — cold-starting a new container...[/dim]")
+    console.print("[dim]No warm container claimed — cold-starting a new container...[/dim]")
 
     with console.status(f"[bold green]Creating workspace [cyan]{name}[/cyan]...[/bold green]"):
         try:

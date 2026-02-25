@@ -64,26 +64,32 @@ class PoolManager:
             The claimed WorkspaceRecord (already updated in DB), or None
             if the pool is empty.
         """
+        self._prune_stale_pool_members(template=template)
+
         claimed = self.db.claim_pool_member(new_name, template=template)
         if not claimed:
+            self._schedule_replenish_from_settings()
             return None
 
         record, old_name = claimed
         try:
             dc.rename_container(record.container_id, new_name)
         except Exception:
-            self.db.restore_pool_member(record.id, old_name)
+            container = dc.get_container(record.container_id)
+            if container is None:
+                self.db.delete_workspace_by_id(record.id)
+            else:
+                self.db.restore_pool_member(record.id, old_name)
+            self._schedule_replenish_from_settings()
             return None
 
         # Replenish in the background so the CLI returns immediately.
-        target = self.db.get_pool_target(default=0)
-        if target > 0:
-            replenish_template = self.db.get_pool_template(default=record.template)
-            self._replenish_async(template=replenish_template, target=target)
+        self._schedule_replenish_from_settings(default_template=record.template)
         return record
 
     def status(self) -> PoolStatus:
         """Return a snapshot of current pool state."""
+        self._prune_stale_pool_members()
         counts = self.db.count_pool_members()
         warm = counts.get(STATE_POOL, 0)
         # Count containers that were pool members but are now in use
@@ -99,6 +105,7 @@ class PoolManager:
 
     def _replenish(self, template: str = "base", target: int = 1) -> list[WorkspaceRecord]:
         """Create warm containers until pool has `target` ready members."""
+        self._prune_stale_pool_members(template=template)
         current_warm = len(self.db.list_pool_members())
         needed = max(0, target - current_warm)
         created: list[WorkspaceRecord] = []
@@ -124,6 +131,25 @@ class PoolManager:
             self.db.insert_workspace(record)
             created.append(record)
         return created
+
+    def _prune_stale_pool_members(self, template: str | None = None) -> int:
+        """Delete pool rows that no longer map to a running Docker container."""
+        stale_removed = 0
+        for member in self.db.list_pool_members():
+            if template and member.template != template:
+                continue
+            container = dc.get_container(member.container_id)
+            if not container or container.status != "running":
+                self.db.delete_workspace_by_id(member.id)
+                stale_removed += 1
+        return stale_removed
+
+    def _schedule_replenish_from_settings(self, default_template: str = "base") -> None:
+        target = self.db.get_pool_target(default=0)
+        if target <= 0:
+            return
+        template = self.db.get_pool_template(default=default_template)
+        self._replenish_async(template=template, target=target)
 
     def _replenish_async(self, template: str = "base", target: int = 1) -> None:
         """Spawn a daemon thread to replenish the pool without blocking."""
